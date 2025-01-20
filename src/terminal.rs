@@ -1,4 +1,4 @@
-use crossterm::{event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, terminal};
+use crossterm::{cursor, event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, execute, terminal};
 use std::io::{self, Write};
 use thiserror::Error;
 
@@ -28,6 +28,8 @@ trait SpecificKeybinds {
 	fn key_ctrl(&mut self, input_key: KeyEvent, keycode: KeyCode) -> InputResult<()>;
 	fn key_enter(&mut self) -> InputResult<()>;
 	fn key_backspace(&mut self) -> InputResult<()>;
+	fn key_arrow_right(&mut self) -> InputResult<()>;
+	fn key_arrow_left(&mut self) -> InputResult<()>;
 }
 impl SpecificKeybinds for Pse {
 	const TERM_ID_1: &str = "exit";
@@ -39,7 +41,7 @@ impl SpecificKeybinds for Pse {
 				_ => Ok(())
 			}
 		} else {
-			self.term_render(Some(keycode.to_string()))
+			self.term_render(keycode.to_string())
 		}
 	}
 
@@ -53,33 +55,37 @@ impl SpecificKeybinds for Pse {
 	}
 
 	fn key_backspace(&mut self) -> InputResult<()> {
-		match self.rt.input.pop() {
-		    Some(_) => self.term_render(None),
-		    None => {
-				//the string is empty, do terminal beep
-				Ok(())
-			},
+		if self.rt.input.pop().is_some() {
+			execute!(
+				io::stdout(),
+				cursor::MoveLeft(1),
+				terminal::Clear(terminal::ClearType::UntilNewLine)
+			).map_err(InputHandleError::Flush)
+		} else {
+			//the string is empty, do terminal beep
+			Ok(())
 		}
+	}
+
+	fn key_arrow_right(&mut self) -> InputResult<()> {
+		execute!(io::stdout(), cursor::MoveRight(1)).map_err(InputHandleError::Flush)
+	}
+
+	fn key_arrow_left(&mut self) -> InputResult<()> {
+		execute!(io::stdout(), cursor::MoveLeft(1)).map_err(InputHandleError::Flush)
 	}
 }
 
 pub trait TermProcessor {
-	fn term_render(&mut self, def: Option<String>) -> InputResult<()>;
+	fn term_render(&mut self, def_string: String) -> InputResult<()>;
 	fn term_input_handler(&mut self, input_key: KeyEvent) -> Option<()>;
 	fn term_input_mainthread(&mut self) -> io::Result<()>;
 	fn term_input_processor(&mut self) -> io::Result<()>;
 }
 impl TermProcessor for Pse {
-	fn term_render(&mut self, def: Option<String>) -> InputResult<()> {
-		match def {
-		    Some(def_string) => {
-				self.rt.input.push_str(&def_string);
-				write!(io::stdout(), "{def_string}").map_err(InputHandleError::Write)?;
-			},
-		    None => {
-				write!(io::stdout(), "{}", self.rt.input).map_err(InputHandleError::Write)?
-			}
-		};
+	fn term_render(&mut self, def_string: String) -> InputResult<()> {
+		self.rt.input.push_str(&def_string);
+		write!(io::stdout(), "{def_string}").map_err(InputHandleError::Write)?;
 		io::stdout().flush().map_err(InputHandleError::Flush)
 	}
 
@@ -88,21 +94,21 @@ impl TermProcessor for Pse {
 			KeyCode::Enter     => self.key_enter(),
 			KeyCode::Backspace => self.key_backspace(),
 			KeyCode::Tab       => todo!(),
-			KeyCode::Right     => todo!(),
-			KeyCode::Left      => todo!(),
+			KeyCode::Right     => self.key_arrow_right(),
+			KeyCode::Left      => self.key_arrow_left(),
 			KeyCode::Up        => todo!(),
 			KeyCode::Down      => todo!(),
 			keycode            => self.key_ctrl(input_key, keycode)
 		};
 		input_handle.map_or_else(|inp_err| match inp_err {
 			InputHandleError::UserExit => None,
-		    InputHandleError::Sigterm => self.term_render(Some("^C".to_owned())).ok(),
+		    InputHandleError::Sigterm => self.term_render("^C".to_owned()).ok(),
 			input_err => session::shell_error_none(input_err)
 		}, Some)
 	}
 
 	fn term_input_mainthread(&mut self) -> io::Result<()> {
-		crossterm::execute!(io::stdout(), event::EnableBracketedPaste)?;
+		execute!(io::stdout(), event::EnableBracketedPaste)?;
 		loop {
 			terminal::enable_raw_mode()?;
 		    if let Event::Key(event) = event::read()? {
@@ -114,6 +120,6 @@ impl TermProcessor for Pse {
 	fn term_input_processor(&mut self) -> io::Result<()> {
 		self.term_input_mainthread()?;
 	    terminal::disable_raw_mode()?;
-	    crossterm::execute!(io::stdout(), event::DisableBracketedPaste)
+	    execute!(io::stdout(), event::DisableBracketedPaste)
 	}
 }
