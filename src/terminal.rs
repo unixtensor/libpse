@@ -8,8 +8,8 @@ use crate::{commands::Command, session::{self, Pse}};
 pub enum InputHandleError {
 	#[error("UserExit")]
 	UserExit,
-	#[error("Sigterm")]
-	Sigterm,
+	#[error("Sigint")]
+	Sigint,
 	#[error("Render failure: {0}")]
 	Write(io::Error),
 	#[error("Flush failure: {0}")]
@@ -25,6 +25,8 @@ type InputResult<T> = Result<T, InputHandleError>;
 
 trait SpecificKeybinds {
 	const TERM_ID_1: &str;
+	const KEY_SPACE: char;
+	fn key_literal(&mut self, keycode: KeyCode) -> InputResult<()>;
 	fn key_ctrl(&mut self, input_key: KeyEvent, keycode: KeyCode) -> InputResult<()>;
 	fn key_enter(&mut self) -> InputResult<()>;
 	fn key_backspace(&mut self) -> InputResult<()>;
@@ -33,15 +35,22 @@ trait SpecificKeybinds {
 }
 impl SpecificKeybinds for Pse {
 	const TERM_ID_1: &str = "exit";
+	const KEY_SPACE: char = ' ';
+
+	fn key_literal(&mut self, keycode: KeyCode) -> InputResult<()> {
+		match keycode {
+			KeyCode::Char(Self::KEY_SPACE) => self.term_render(Self::KEY_SPACE.to_string()),
+			keycode => self.term_render(keycode.to_string())
+		}
+	}
 
 	fn key_ctrl(&mut self, input_key: KeyEvent, keycode: KeyCode) -> InputResult<()> {
-		if input_key.modifiers.contains(KeyModifiers::CONTROL) {
-			match keycode {
-				KeyCode::Char('c') => Err(InputHandleError::Sigterm),
+		match input_key.modifiers.contains(KeyModifiers::CONTROL) {
+			true => match keycode {
+				KeyCode::Char('c') => Err(InputHandleError::Sigint),
 				_ => Ok(())
-			}
-		} else {
-			self.term_render(keycode.to_string())
+			},
+			false => self.key_literal(keycode)
 		}
 	}
 
@@ -51,7 +60,7 @@ impl SpecificKeybinds for Pse {
 		terminal::disable_raw_mode().map_err(InputHandleError::DisableRaw)?;
 		Command::new(&self.rt.input).exec(&mut self.history);
 		self.rt.input.clear();
-		Ok(())
+		self.term_render_ps()
 	}
 
 	fn key_backspace(&mut self) -> InputResult<()> {
@@ -78,6 +87,7 @@ impl SpecificKeybinds for Pse {
 
 pub trait TermProcessor {
 	fn term_render(&mut self, def_string: String) -> InputResult<()>;
+	fn term_render_ps(&self) -> InputResult<()>;
 	fn term_input_handler(&mut self, input_key: KeyEvent) -> Option<()>;
 	fn term_input_mainthread(&mut self) -> io::Result<()>;
 	fn term_input_processor(&mut self) -> io::Result<()>;
@@ -86,6 +96,11 @@ impl TermProcessor for Pse {
 	fn term_render(&mut self, def_string: String) -> InputResult<()> {
 		self.rt.input.push_str(&def_string);
 		write!(io::stdout(), "{def_string}").map_err(InputHandleError::Write)?;
+		io::stdout().flush().map_err(InputHandleError::Flush)
+	}
+
+	fn term_render_ps(&self) -> InputResult<()> {
+		print!("{}", self.rt.ps.borrow());
 		io::stdout().flush().map_err(InputHandleError::Flush)
 	}
 
@@ -102,13 +117,14 @@ impl TermProcessor for Pse {
 		};
 		input_handle.map_or_else(|inp_err| match inp_err {
 			InputHandleError::UserExit => None,
-		    InputHandleError::Sigterm => self.term_render("^C".to_owned()).ok(),
+		    InputHandleError::Sigint => self.term_render("^C".to_owned()).ok(),
 			input_err => session::shell_error_none(input_err)
 		}, Some)
 	}
 
 	fn term_input_mainthread(&mut self) -> io::Result<()> {
 		execute!(io::stdout(), event::EnableBracketedPaste)?;
+		self.term_render_ps();
 		loop {
 			terminal::enable_raw_mode()?;
 		    if let Event::Key(event) = event::read()? {

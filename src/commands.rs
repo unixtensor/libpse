@@ -99,7 +99,7 @@ impl<'a> Command<'a> {
 				history.add(self.0.as_str());
 				child.wait().ok();
 			},
-		    Err(_) => println!("pse: Unknown command: {}", self.0),
+		    Err(_) => println!("\npse: Unknown command: {}", self.0),
 		}
 	}
 
