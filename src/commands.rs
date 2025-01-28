@@ -88,7 +88,7 @@ impl Command for Pse {
 		let mut args = self.rt.input.split_whitespace();
 		if let Some(command) = args.next() {
 			match command {
-				"cd" => if ChangeDirectory.change_directory(args).is_some() { self.history.add(&self.rt.input.as_str()) },
+				"cd" => if ChangeDirectory.change_directory(args).is_some() { self.history.add(self.rt.input.as_str()) },
 				command => if let Ok(mut child) = process::Command::new(command).args(args).spawn() {
 	    			self.history.add(self.rt.input.as_str());
 					child.wait().ok();
