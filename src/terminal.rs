@@ -24,7 +24,7 @@ pub enum InputHandleError {
 type InputResult<T> = Result<T, InputHandleError>;
 
 trait SpecificKeybinds {
-	const TERM_ID_1: &str;
+	const EXIT_1: &str;
 	const KEY_SPACE: char;
 	fn key_literal(&mut self, keycode: KeyCode) -> InputResult<()>;
 	fn key_ctrl(&mut self, input_key: KeyEvent, keycode: KeyCode) -> InputResult<()>;
@@ -34,7 +34,7 @@ trait SpecificKeybinds {
 	fn key_arrow_left(&mut self) -> InputResult<()>;
 }
 impl SpecificKeybinds for Pse {
-	const TERM_ID_1: &str = "exit";
+	const EXIT_1: &str = "exit";
 	const KEY_SPACE: char = ' ';
 
 	fn key_literal(&mut self, keycode: KeyCode) -> InputResult<()> {
@@ -55,10 +55,10 @@ impl SpecificKeybinds for Pse {
 	}
 
 	fn key_enter(&mut self) -> InputResult<()> {
-		if self.rt.input == Self::TERM_ID_1 { return Err(InputHandleError::UserExit) };
+		if self.rt.input == Self::EXIT_1 { return Err(InputHandleError::UserExit) };
 
 		terminal::disable_raw_mode().map_err(InputHandleError::DisableRaw)?;
-		Command::new(&self.rt.input).exec(&mut self.history);
+		self.spawn_sys_cmd();
 		self.rt.input.clear();
 		self.term_render_ps()
 	}
@@ -124,13 +124,14 @@ impl TermProcessor for Pse {
 
 	fn term_input_mainthread(&mut self) -> io::Result<()> {
 		execute!(io::stdout(), event::EnableBracketedPaste)?;
-		self.term_render_ps();
-		loop {
-			terminal::enable_raw_mode()?;
-		    if let Event::Key(event) = event::read()? {
-				if self.term_input_handler(event).is_none() { break Ok(()) }
+		self.term_render_ps().map_or_else(|_| Ok(()), |()| {
+			loop {
+				terminal::enable_raw_mode()?;
+			    if let Event::Key(event) = event::read()? {
+					if self.term_input_handler(event).is_none() { break Ok(()) }
+				}
 			}
-		}
+		})
 	}
 
 	fn term_input_processor(&mut self) -> io::Result<()> {

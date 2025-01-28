@@ -1,7 +1,7 @@
-use std::{io, process, str::SplitWhitespace, path::{Path, PathBuf}};
+use std::{process, str::SplitWhitespace, path::{Path, PathBuf}};
 use uzers::User;
 
-use crate::{history::History, session::MapDisplay, valid_pbuf::IsValid};
+use crate::{session::{MapDisplay, Pse}, valid_pbuf::IsValid};
 
 trait PathBufIsValid {
 	fn is_valid_or_home(&self) -> Option<PathBuf>;
@@ -12,15 +12,8 @@ impl PathBufIsValid for PathBuf {
 	}
 }
 
-trait ChangeDirectory<'a> {
-	fn change_directory(&self, args: SplitWhitespace) -> Option<PathBuf>;
-	fn set_current_dir(&self, new_path: &Path) -> Option<PathBuf>;
-	fn specific_user_dir(&self, user: String) -> Option<PathBuf>;
-	fn cd_args(&self, vec_args: Vec<String>) -> Option<PathBuf>;
-	fn previous_dir(&self) -> Option<PathBuf>;
-	fn home_dir(&self) -> Option<PathBuf>;
-}
-impl<'a> ChangeDirectory<'a> for Command<'a> {
+struct ChangeDirectory;
+impl ChangeDirectory {
 	fn set_current_dir(&self, new_path: &Path) -> Option<PathBuf> {
 		std::env::set_current_dir(new_path).map_or_display_none(|()| Some(new_path.to_path_buf()))
 	}
@@ -36,10 +29,10 @@ impl<'a> ChangeDirectory<'a> for Command<'a> {
 	fn specific_user_dir(&self, requested_user: String) -> Option<PathBuf> {
 		match requested_user.as_str() {
 			"root" => PathBuf::from("/root").is_valid_or_home(),
-			_ => {
+			u => {
 				for user in unsafe { uzers::all_users().collect::<Vec<User>>() } {
 					let user_name = user.name();
-					if *requested_user == *user_name {
+					if *u == *user_name {
 						let mut user_dir = PathBuf::from("/home");
 						user_dir.push(user_name);
 						return user_dir.is_valid_or_home();
@@ -72,8 +65,8 @@ impl<'a> ChangeDirectory<'a> for Command<'a> {
 			Some(arg) => match arg.as_str() {
 				"/" => self.set_current_dir(Path::new("/")),
 				"-" => self.previous_dir(),
-				_ => {
-					let mut arg_chars = arg.chars();
+				arg_str => {
+					let mut arg_chars = arg_str.chars();
 					match arg_chars.next() {
 						Some(char) => match char == '~' {
 							true => self.specific_user_dir(arg_chars.collect::<String>()),
@@ -87,28 +80,21 @@ impl<'a> ChangeDirectory<'a> for Command<'a> {
 	}
 }
 
-pub struct Command<'a>(&'a String);
-impl<'a> Command<'a> {
-	pub const fn new(input: &'a String) -> Self {
-		Self(input)
-	}
-
-	pub fn spawn_sys_cmd(&mut self, history: &mut History, command_process: io::Result<process::Child>) {
-		match command_process {
-		    Ok(mut child) => {
-				history.add(self.0.as_str());
-				child.wait().ok();
-			},
-		    Err(_) => println!("\npse: Unknown command: {}", self.0),
-		}
-	}
-
-	pub fn exec(&mut self, history: &mut History) {
-		let mut args = self.0.split_whitespace();
+pub trait Command {
+	fn spawn_sys_cmd(&mut self);
+}
+impl Command for Pse {
+	fn spawn_sys_cmd(&mut self) {
+		let mut args = self.rt.input.split_whitespace();
 		if let Some(command) = args.next() {
 			match command {
-				"cd" => if self.change_directory(args).is_some() { history.add(self.0.as_str()) },
-				command => { self.spawn_sys_cmd(history, process::Command::new(command).args(args).spawn()); }
+				"cd" => if ChangeDirectory.change_directory(args).is_some() { self.history.add(&self.rt.input.as_str()) },
+				command => if let Ok(mut child) = process::Command::new(command).args(args).spawn() {
+	    			self.history.add(self.rt.input.as_str());
+					child.wait().ok();
+				} else {
+		   			println!("\npse: Unknown command: {}", self.rt.input)
+				}
 			}
 		}
 	}
