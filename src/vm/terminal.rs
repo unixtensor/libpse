@@ -39,6 +39,7 @@ fn text_styles_funcs(luau: &Luau) -> lResult<(Table, Table)> {
 		underline_grey        underline_black        underline_green      underline_yellow
 		underline_blue        underline_magenta      underline_cyan       underline_white
 		bold
+		crossed_out
 	);
 	background_styles_luau!(luau, background_table,
 		on_dark_grey   on_dark_red     on_dark_green on_dark_cyan
