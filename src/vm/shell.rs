@@ -29,8 +29,13 @@ impl UserData for Shell {
 	fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
 		methods.add_meta_method_mut(MetaMethod::NewIndex, |_, this, (t_index, t_value): (String, String)| -> lResult<()> {
 			if t_index == "PROMPT" {
-				let mut prompt = this.0.borrow_mut();
-				*prompt = t_value;
+				match t_value.len() as u16 >= u16::MAX {
+			        true => { mlua::Error::runtime(format!("SHELL.PROMPT's length exceeded or equals the max size. ({})", u16::MAX)); },
+			        false => {
+						let mut prompt = this.0.borrow_mut();
+						*prompt = t_value;
+					},
+			    }
 			}
 			Ok(())
 		});

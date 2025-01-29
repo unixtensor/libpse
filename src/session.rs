@@ -1,5 +1,5 @@
 use mlua::Lua as Luau;
-use std::{cell::RefCell, fs, rc::Rc};
+use std::{cell::RefCell, fs, rc::Rc, usize};
 use core::fmt;
 
 use crate::{
@@ -41,9 +41,14 @@ pub struct Config {
 	pub norc: bool,
 	pub vm: VmConfig,
 }
+#[derive(Debug, Clone)]
+pub struct Input {
+	pub literal: String,
+	pub cursor: usize,
+}
 pub struct Rt {
+	pub input: Input,
 	pub ps: Rc<RefCell<String>>,
-	pub input: String,
 	pub vm: Luau,
 }
 pub struct Pse {
@@ -55,15 +60,16 @@ impl Pse {
 	const DEFAULT_PS: &str = concat!("pse-", env!("CARGO_PKG_VERSION"), "$ ");
 
 	pub fn create(config: Config) -> Self {
-		Self {
-			rt: Rt {
-				ps: Rc::new(RefCell::new(Self::DEFAULT_PS.to_owned())),
-				input: String::new(),
-				vm: Luau::new(),
+		let rt = Rt {
+			ps: Rc::new(RefCell::new(Self::DEFAULT_PS.to_owned())),
+			vm: Luau::new(),
+			input: Input {
+				literal: String::new(),
+				cursor: usize::MIN,
 			},
-			history: History::init(),
-			config,
-		}
+		};
+
+		Self { rt, config, history: History::init() }
 	}
 
 	pub fn start(&mut self) {

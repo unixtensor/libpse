@@ -1,4 +1,5 @@
 use crossterm::{cursor, event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, execute, terminal};
+use core::fmt;
 use std::io::{self, Write};
 use thiserror::Error;
 
@@ -22,6 +23,13 @@ pub enum InputHandleError {
 	Key(KeyCode),
 }
 type InputResult<T> = Result<T, InputHandleError>;
+
+#[allow(dead_code)]
+fn debug<S: fmt::Display>(s: S) {
+	terminal::disable_raw_mode().unwrap();
+	println!("{s}");
+	terminal::enable_raw_mode().unwrap()
+}
 
 trait SpecificKeybinds {
 	const EXIT_1: &str;
@@ -55,33 +63,72 @@ impl SpecificKeybinds for Pse {
 	}
 
 	fn key_enter(&mut self) -> InputResult<()> {
-		if self.rt.input == Self::EXIT_1 { return Err(InputHandleError::UserExit) };
+		if self.rt.input.literal == Self::EXIT_1 { return Err(InputHandleError::UserExit) };
 
 		terminal::disable_raw_mode().map_err(InputHandleError::DisableRaw)?;
+		println!();
 		self.spawn_sys_cmd();
-		self.rt.input.clear();
+		self.rt.input.literal.clear();
+		self.rt.input.cursor = usize::MIN;
 		self.term_render_ps()
 	}
 
 	fn key_backspace(&mut self) -> InputResult<()> {
-		if self.rt.input.pop().is_some() {
+		if self.rt.input.literal.pop().is_some() {
 			execute!(
 				io::stdout(),
 				cursor::MoveLeft(1),
 				terminal::Clear(terminal::ClearType::UntilNewLine)
-			).map_err(InputHandleError::Flush)
+			).map_err(InputHandleError::Flush)?;
+			self.rt.input.cursor-=1;
+			Ok(())
 		} else {
-			//the string is empty, do terminal beep
 			Ok(())
 		}
 	}
 
 	fn key_arrow_right(&mut self) -> InputResult<()> {
-		execute!(io::stdout(), cursor::MoveRight(1)).map_err(InputHandleError::Flush)
+		match self.term_input_cursor_move_right() {
+			Some(()) => execute!(io::stdout(), cursor::MoveRight(1)).map_err(InputHandleError::Flush),
+			None => Ok(())
+		}
 	}
 
 	fn key_arrow_left(&mut self) -> InputResult<()> {
-		execute!(io::stdout(), cursor::MoveLeft(1)).map_err(InputHandleError::Flush)
+		match self.term_input_cursor_move_left() {
+			Some(()) => execute!(io::stdout(), cursor::MoveLeft(1)).map_err(InputHandleError::Flush),
+			None => Ok(())
+		}
+	}
+}
+
+pub trait TermInputCursor {
+	fn term_input_cursor_move_left(&mut self) -> Option<()>;
+	fn term_input_cursor_move_right(&mut self) -> Option<()>;
+}
+impl TermInputCursor for Pse {
+	fn term_input_cursor_move_left(&mut self) -> Option<()> {
+		if self.rt.input.cursor == usize::MIN { None } else {
+			match self.rt.input.cursor>usize::MIN {
+				true => {
+					self.rt.input.cursor-=1;
+					Some(())
+				},
+				false => None
+			}
+		}
+	}
+
+	fn term_input_cursor_move_right(&mut self) -> Option<()> {
+		if self.rt.input.cursor == usize::MAX { None } else {
+			match self.rt.input.cursor<self.rt.input.literal.chars().count() {
+				true => {
+					self.rt.input.cursor+=1;
+					Some(())
+				},
+				false => None
+			}
+		}
 	}
 }
 
@@ -94,8 +141,13 @@ pub trait TermProcessor {
 }
 impl TermProcessor for Pse {
 	fn term_render(&mut self, def_string: String) -> InputResult<()> {
-		self.rt.input.push_str(&def_string);
-		write!(io::stdout(), "{def_string}").map_err(InputHandleError::Write)?;
+		self.rt.input.literal.insert_str(self.rt.input.cursor, &def_string);
+		self.rt.input.cursor+=1;
+		if self.rt.input.cursor != self.rt.input.literal.chars().count() {
+
+		} else {
+			write!(io::stdout(), "{}", def_string).map_err(InputHandleError::Write)?;
+		}
 		io::stdout().flush().map_err(InputHandleError::Flush)
 	}
 
