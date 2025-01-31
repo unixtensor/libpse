@@ -1,6 +1,6 @@
 use crossterm::{cursor, event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, execute, terminal};
 use core::fmt;
-use std::{io::{self, Write}, mem};
+use std::io::{self, Write};
 use thiserror::Error;
 
 use crate::{commands::Command, session::{self, Pse}};
@@ -32,7 +32,7 @@ fn debug<S: fmt::Display>(s: S) {
 }
 
 trait SpecificKeybinds {
-	const EXIT_1: &str;
+	const EXIT_ID_1: &str;
 	const KEY_SPACE: char;
 	fn key_literal(&mut self, keycode: KeyCode) -> InputResult<()>;
 	fn key_ctrl(&mut self, input_key: KeyEvent, keycode: KeyCode) -> InputResult<()>;
@@ -44,7 +44,7 @@ trait SpecificKeybinds {
 	fn key_arrow_down(&mut self) -> InputResult<()>;
 }
 impl SpecificKeybinds for Pse {
-	const EXIT_1: &str = "exit";
+	const EXIT_ID_1: &str = "exit";
 	const KEY_SPACE: char = ' ';
 
 	fn key_literal(&mut self, keycode: KeyCode) -> InputResult<()> {
@@ -58,6 +58,7 @@ impl SpecificKeybinds for Pse {
 		match input_key.modifiers.contains(KeyModifiers::CONTROL) {
 			true => match keycode {
 				KeyCode::Char('c') => Err(InputHandleError::Sigint),
+				KeyCode::Char('r') => unimplemented!(),
 				_ => Ok(())
 			},
 			false => self.key_literal(keycode)
@@ -65,13 +66,13 @@ impl SpecificKeybinds for Pse {
 	}
 
 	fn key_enter(&mut self) -> InputResult<()> {
-		if self.rt.input.literal == Self::EXIT_1 { return Err(InputHandleError::UserExit) };
+		if self.rt.input.literal == Self::EXIT_ID_1 { return Err(InputHandleError::UserExit) };
 
 		terminal::disable_raw_mode().map_err(InputHandleError::DisableRaw)?;
 		println!();
 		self.spawn_sys_cmd();
 		self.rt.input.literal.clear();
-		self.rt.input.cursor = usize::MIN;
+		self.rt.input.cursor = u16::MIN;
 		self.term_render_ps()
 	}
 
@@ -102,15 +103,21 @@ impl SpecificKeybinds for Pse {
 	}
 
 	fn key_arrow_up(&mut self) -> InputResult<()> {
-		if self.rt.input.literal.is_empty() {
-			self.rt.history.index += 1;
-			// if self.rt.history_index == self.history.fs_history
+		self.rt.history.index += 1;
+		if self.rt.history.index != self.rt.history.history.len() as isize {
+			self.term_render_reset()?;
+			self.term_render(self.rt.history.history[self.rt.history.index as usize].clone())?;
 		}
 		Ok(())
 	}
 
 	fn key_arrow_down(&mut self) -> InputResult<()> {
-		unimplemented!()
+		self.rt.history.index -= 1;
+		if self.rt.history.index != -1 {
+			self.term_render_reset()?;
+			self.term_render(self.rt.history.history[self.rt.history.index as usize].clone())?;
+		}
+		Ok(())
 	}
 }
 
@@ -120,8 +127,8 @@ pub trait TermInputCursor {
 }
 impl TermInputCursor for Pse {
 	fn term_input_cursor_move_left(&mut self) -> Option<()> {
-		if self.rt.input.cursor == usize::MIN { None } else {
-			match self.rt.input.cursor>usize::MIN {
+		if self.rt.input.cursor == u16::MIN { None } else {
+			match self.rt.input.cursor>u16::MIN {
 				true => { self.rt.input.cursor-=1; Some(()) }
 				false => None
 			}
@@ -129,8 +136,8 @@ impl TermInputCursor for Pse {
 	}
 
 	fn term_input_cursor_move_right(&mut self) -> Option<()> {
-		if self.rt.input.cursor == usize::MAX { None } else {
-			match self.rt.input.cursor<self.rt.input.literal.chars().count() {
+		if self.rt.input.cursor == u16::MAX { None } else {
+			match self.rt.input.cursor<self.rt.input.literal.chars().count() as u16 {
 				true => { self.rt.input.cursor+=1; Some(()) },
 				false => None
 			}
@@ -141,17 +148,19 @@ impl TermInputCursor for Pse {
 pub trait TermProcessor {
 	fn term_render(&mut self, def_string: String) -> InputResult<()>;
 	fn term_render_ps(&self) -> InputResult<()>;
+	fn term_render_reset(&mut self) -> InputResult<()>;
 	fn term_input_handler(&mut self, input_key: KeyEvent) -> Option<()>;
 	fn term_input_mainthread(&mut self) -> io::Result<()>;
 	fn term_input_processor(&mut self) -> io::Result<()>;
 }
 impl TermProcessor for Pse {
 	fn term_render(&mut self, text: String) -> InputResult<()> {
-		self.rt.input.literal.insert_str(self.rt.input.cursor, &text);
-		self.rt.input.cursor+=1;
-		if self.rt.input.cursor != self.rt.input.literal.chars().count() {
+		self.rt.input.literal.insert_str(self.rt.input.cursor.into(), &text);
+		let input_literal_size = self.rt.input.literal.chars().count() as u16;
+		self.rt.input.cursor = input_literal_size;
+		if self.rt.input.cursor != input_literal_size {
 			execute!(io::stdout(), terminal::Clear(terminal::ClearType::UntilNewLine)).map_err(InputHandleError::Flush)?;
-			let slice = &self.rt.input.literal[self.rt.input.cursor..];
+			let slice = &self.rt.input.literal[(self.rt.input.cursor as usize)..];
 			write!(io::stdout(), "{text}{slice}").map_err(InputHandleError::Write)?;
 		} else {
 			write!(io::stdout(), "{text}").map_err(InputHandleError::Write)?;
@@ -162,6 +171,13 @@ impl TermProcessor for Pse {
 	fn term_render_ps(&self) -> InputResult<()> {
 		print!("{}", self.rt.ps.borrow());
 		io::stdout().flush().map_err(InputHandleError::Flush)
+	}
+
+	fn term_render_reset(&mut self) -> InputResult<()> {
+		execute!(io::stdout(), cursor::MoveLeft(self.rt.input.cursor)).map_err(InputHandleError::Flush)?;
+		self.rt.input.cursor = u16::MIN;
+		self.rt.input.literal.clear();
+		execute!(io::stdout(), terminal::Clear(terminal::ClearType::UntilNewLine)).map_err(InputHandleError::Flush)
 	}
 
 	fn term_input_handler(&mut self, input_key: KeyEvent) -> Option<()> {

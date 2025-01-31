@@ -18,7 +18,10 @@ impl History {
 		});
 		file.as_ref().and_then(|file| {
 			File::open(file).map_or_display_none(|file| {
-				Some(BufReader::new(file).lines().map_while(Result::ok).collect::<Vec<String>>())
+				let mut fs_history_vec = BufReader::new(file).lines().map_while(Result::ok).collect::<Vec<String>>();
+				fs_history_vec.dedup();
+				fs_history_vec.reverse();
+				Some(fs_history_vec)
 			})
 		}).inspect(|fs_history_vec| history = fs_history_vec.clone());
 

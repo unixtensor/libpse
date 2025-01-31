@@ -44,7 +44,7 @@ pub struct Config {
 #[derive(Debug, Clone)]
 pub struct Input {
 	pub literal: String,
-	pub cursor: usize,
+	pub cursor: u16,
 }
 pub struct Rt {
 	pub input: Input,
@@ -66,7 +66,7 @@ impl Pse {
 			history: History::init(),
 			input: Input {
 				literal: String::new(),
-				cursor: usize::MIN,
+				cursor: u16::MIN,
 			},
 		};
 
