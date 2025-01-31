@@ -1,6 +1,6 @@
 use crossterm::{cursor, event::{self, Event, KeyCode, KeyEvent, KeyModifiers}, execute, terminal};
 use core::fmt;
-use std::io::{self, Write};
+use std::{io::{self, Write}, mem};
 use thiserror::Error;
 
 use crate::{commands::Command, session::{self, Pse}};
@@ -40,6 +40,8 @@ trait SpecificKeybinds {
 	fn key_backspace(&mut self) -> InputResult<()>;
 	fn key_arrow_right(&mut self) -> InputResult<()>;
 	fn key_arrow_left(&mut self) -> InputResult<()>;
+	fn key_arrow_up(&mut self) -> InputResult<()>;
+	fn key_arrow_down(&mut self) -> InputResult<()>;
 }
 impl SpecificKeybinds for Pse {
 	const EXIT_1: &str = "exit";
@@ -81,10 +83,8 @@ impl SpecificKeybinds for Pse {
 				terminal::Clear(terminal::ClearType::UntilNewLine)
 			).map_err(InputHandleError::Flush)?;
 			self.rt.input.cursor-=1;
-			Ok(())
-		} else {
-			Ok(())
 		}
+		Ok(())
 	}
 
 	fn key_arrow_right(&mut self) -> InputResult<()> {
@@ -100,6 +100,18 @@ impl SpecificKeybinds for Pse {
 			None => Ok(())
 		}
 	}
+
+	fn key_arrow_up(&mut self) -> InputResult<()> {
+		if self.rt.input.literal.is_empty() {
+			self.rt.history.index += 1;
+			// if self.rt.history_index == self.history.fs_history
+		}
+		Ok(())
+	}
+
+	fn key_arrow_down(&mut self) -> InputResult<()> {
+		unimplemented!()
+	}
 }
 
 pub trait TermInputCursor {
@@ -110,10 +122,7 @@ impl TermInputCursor for Pse {
 	fn term_input_cursor_move_left(&mut self) -> Option<()> {
 		if self.rt.input.cursor == usize::MIN { None } else {
 			match self.rt.input.cursor>usize::MIN {
-				true => {
-					self.rt.input.cursor-=1;
-					Some(())
-				},
+				true => { self.rt.input.cursor-=1; Some(()) }
 				false => None
 			}
 		}
@@ -122,10 +131,7 @@ impl TermInputCursor for Pse {
 	fn term_input_cursor_move_right(&mut self) -> Option<()> {
 		if self.rt.input.cursor == usize::MAX { None } else {
 			match self.rt.input.cursor<self.rt.input.literal.chars().count() {
-				true => {
-					self.rt.input.cursor+=1;
-					Some(())
-				},
+				true => { self.rt.input.cursor+=1; Some(()) },
 				false => None
 			}
 		}
@@ -140,13 +146,15 @@ pub trait TermProcessor {
 	fn term_input_processor(&mut self) -> io::Result<()>;
 }
 impl TermProcessor for Pse {
-	fn term_render(&mut self, def_string: String) -> InputResult<()> {
-		self.rt.input.literal.insert_str(self.rt.input.cursor, &def_string);
+	fn term_render(&mut self, text: String) -> InputResult<()> {
+		self.rt.input.literal.insert_str(self.rt.input.cursor, &text);
 		self.rt.input.cursor+=1;
 		if self.rt.input.cursor != self.rt.input.literal.chars().count() {
-
+			execute!(io::stdout(), terminal::Clear(terminal::ClearType::UntilNewLine)).map_err(InputHandleError::Flush)?;
+			let slice = &self.rt.input.literal[self.rt.input.cursor..];
+			write!(io::stdout(), "{text}{slice}").map_err(InputHandleError::Write)?;
 		} else {
-			write!(io::stdout(), "{}", def_string).map_err(InputHandleError::Write)?;
+			write!(io::stdout(), "{text}").map_err(InputHandleError::Write)?;
 		}
 		io::stdout().flush().map_err(InputHandleError::Flush)
 	}
@@ -163,8 +171,8 @@ impl TermProcessor for Pse {
 			KeyCode::Tab       => todo!(),
 			KeyCode::Right     => self.key_arrow_right(),
 			KeyCode::Left      => self.key_arrow_left(),
-			KeyCode::Up        => todo!(),
-			KeyCode::Down      => todo!(),
+			KeyCode::Up        => self.key_arrow_up(),
+			KeyCode::Down      => self.key_arrow_down(),
 			keycode            => self.key_ctrl(input_key, keycode)
 		};
 		input_handle.map_or_else(|inp_err| match inp_err {

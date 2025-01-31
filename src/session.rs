@@ -1,5 +1,5 @@
 use mlua::Lua as Luau;
-use std::{cell::RefCell, fs, rc::Rc, usize};
+use std::{cell::RefCell, fs, rc::Rc};
 use core::fmt;
 
 use crate::{
@@ -50,10 +50,10 @@ pub struct Rt {
 	pub input: Input,
 	pub ps: Rc<RefCell<String>>,
 	pub vm: Luau,
+	pub history: History,
 }
 pub struct Pse {
 	pub config: Config,
-	pub history: History,
 	pub rt: Rt
 }
 impl Pse {
@@ -63,13 +63,14 @@ impl Pse {
 		let rt = Rt {
 			ps: Rc::new(RefCell::new(Self::DEFAULT_PS.to_owned())),
 			vm: Luau::new(),
+			history: History::init(),
 			input: Input {
 				literal: String::new(),
 				cursor: usize::MIN,
 			},
 		};
 
-		Self { rt, config, history: History::init() }
+		Self { rt, config }
 	}
 
 	pub fn start(&mut self) {
@@ -78,6 +79,6 @@ impl Pse {
 				fs::read_to_string(conf_file).map_or_display(|luau_conf| self.vm_exec(luau_conf));
 			}
 		};
-		self.term_input_processor().map_or_display(|()| self.history.write_to_file_fallible())
+		self.term_input_processor().map_or_display(|()| self.rt.history.write_to_file_fallible())
 	}
 }

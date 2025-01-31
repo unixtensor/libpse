@@ -96,10 +96,10 @@ impl Command for Pse {
 		if let Some(command) = args.next() {
 			match command {
 				"cd" => if ChangeDirectory(None).change_directory(args).is_some() {
-					self.history.add(self.rt.input.literal.as_str())
+					self.rt.history.add(self.rt.input.literal.as_str())
 				},
 				command => if let Ok(mut child) = process::Command::new(command).args(args).spawn() {
-	    			self.history.add(self.rt.input.literal.as_str());
+	    			self.rt.history.add(self.rt.input.literal.as_str());
 					child.wait().ok();
 				} else {
 		   			println!("pse: Unknown command: {}", self.rt.input.literal)
